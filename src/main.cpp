@@ -10,11 +10,21 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <memory>
+#include <sstream>
+#include <unistd.h>
 
-#include "./log/Log.h"
-#include "config.h"
+#include "./Log.h"
+#include "./config.h"
+#include "./Protocols.h"
+
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <sys/un.h>
 
 using namespace std;
+
+const int SOCKET_DATA_BUF_SIZE = 4096;
 
 static struct {
     map<string, string> variables;
@@ -25,7 +35,11 @@ static struct {
 static map<string, string> envVars;
 
 static struct {
-    int __todo = 0; // todo
+    struct {
+        string xdgRuntimeDir;
+    } environment;
+
+    string domainSocket;
 } config;
 
 static void usage() {
@@ -117,6 +131,210 @@ static int processPureQueryCmds() {
     return 0;
 }
 
+static int buildConfig() {
+    if (!envVars.contains("XDG_RUNTIME_DIR")) {
+        cout << "error: XDG_RUNTIME_DIR required but not set." << endl;
+        usage();
+        return -1;
+    } else {
+        config.environment.xdgRuntimeDir = envVars["XDG_RUNTIME_DIR"];
+    }
+
+    if (!userArgs.variables.contains("--domain-socket")) {
+        cout << "error: --domain-socket required but not found." << endl;
+        usage();
+        return -2;
+    } else {
+        config.domainSocket = userArgs.variables["--domain-socket"];
+    }
+    
+    return 0;
+}
+
+static void sendResponse(int connFd, uint32_t code, const string& msg) {
+    vl::protocol::Response response;
+    response.code = code;
+    response.msg = msg;
+    
+    stringstream s(ios::in | ios::out | ios::binary);
+    response.encode(s);
+
+    string str = s.str();
+    write(connFd, str.c_str(), str.length());
+}
+
+
+/**
+ * 
+ * 
+ * 
+ * @return 异常退出时，返回负数；
+ *         正常退出时，如果希望结束监听，不再服务下一个 client，返回0；否则返回正数。
+ */
+static int processProtocol(vl::protocol::Base* protocol, int connFd) {
+    auto protocolType = protocol->getType();
+    
+    if (protocolType == vl::protocol::ShellLaunch::typeCode) {
+        auto* p = (vl::protocol::ShellLaunch*) protocol;
+        pid_t pid = fork();
+        if (pid < 0) {
+            const char* errMsg = "failed to create subprocess!";
+            LOG_ERROR(errMsg);
+            sendResponse(connFd, 1, errMsg);
+            return 1;
+        } else if (pid == 0) { // new process
+            execl("/bin/sh", "/bin/sh", "-c", p->cmd.c_str(), nullptr);
+            exit(-1);
+        }
+
+        sendResponse(connFd, 0, "");
+
+        return 0;
+    } else {
+        LOG_ERROR("type unrecognized: ", protocol->getType());
+        return 1;
+    }
+}
+
+static int readNBytesFromSocket(int connFd, int n, char* buf) {
+    int totalBytesRead = 0;
+    char* dataPtr = buf;
+    while (totalBytesRead < n) {
+        int bytes = read(connFd, dataPtr, n - totalBytesRead);
+        if (bytes < 0) {
+            LOG_ERROR("read error! nBytes is ", n);
+            return -2;
+        } else if (bytes == 0) {
+            LOG_ERROR("unexpected EOF from socket.");
+            return -3;
+        }
+
+        totalBytesRead += bytes;
+        dataPtr += bytes;
+    }
+
+    return 0;
+}
+
+
+/**
+ * 
+ * 
+ * 
+ * @return 异常退出时，返回负数；
+ *         正常退出时，如果希望结束监听，返回0；否则返回正数。
+ */
+static int acceptClient(int listenFd, char* buf) {
+
+    sockaddr_un client;
+    socklen_t clientLen = sizeof(client);
+
+    int connFd = accept(listenFd, (sockaddr*) &client, &clientLen);
+    if (connFd < 0) {
+        LOG_WARN("socket connection failed.");
+        return 1;
+    }
+
+    char* dataPtr = buf;
+    int resCode = 0;
+    do {
+        // 读入 header
+
+        const int HEADER_LEN = 16;
+        if (readNBytesFromSocket(connFd, HEADER_LEN, dataPtr)) {
+            const char* err = "failed to read header!";
+            LOG_ERROR(err);
+            sendResponse(connFd, 2, err);
+            resCode = 2;
+            break;
+        }
+
+        if (strncmp(dataPtr, vl::protocol::MAGIC_STR, 4)) {
+            const char* err = "magic mismatched!";
+            LOG_ERROR(err);
+            sendResponse(connFd, 3, err);
+            resCode = 3;
+            break;
+        }
+        dataPtr += 4;
+
+        uint32_t type = be32toh(*(uint32_t*) dataPtr);
+        dataPtr += 4;
+
+        uint64_t length = be64toh(*(uint64_t*) dataPtr);
+        dataPtr += 8;
+
+        if (readNBytesFromSocket(connFd, length, dataPtr)) {
+            const char* err = "failed to read body!";
+            LOG_ERROR(err);
+            sendResponse(connFd, 5, err);
+            resCode = 5;
+            break;
+        }
+    
+        vl::protocol::Base* protocol = vl::protocol::decode(buf, type, length + HEADER_LEN);
+
+        if (protocol == nullptr) {
+            const char* err = "failed to parse protocol!";
+            LOG_ERROR(err);
+            sendResponse(connFd, 7, err);
+            resCode = 6;
+            break;
+        }
+
+        resCode = processProtocol(protocol, connFd);
+
+    } while (0); // end of do-while(0)
+
+    close(connFd);
+    return resCode;
+}
+
+
+static int runSocketServer() {
+    char* bufRaw = new (nothrow) char[SOCKET_DATA_BUF_SIZE];
+    if (bufRaw == nullptr) {
+        LOG_ERROR("failed to alloc socket data buffer");
+        return -1;
+    }
+    unique_ptr<char> buf(bufRaw);
+
+    string socketAddr = config.environment.xdgRuntimeDir + "/" + config.domainSocket;
+
+    int listenFd;
+    if ( (listenFd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0 ) {
+        LOG_ERROR("failed to create domain socket at: ", socketAddr);
+        return -1;
+    }
+
+    sockaddr_un server;
+
+    memset(&server, 0, sizeof(server));
+    server.sun_family = AF_UNIX;
+    strcpy(server.sun_path, socketAddr.c_str());
+    unlink(socketAddr.c_str());
+
+    int size = offsetof(sockaddr_un, sun_path) + socketAddr.length();
+
+    if ( bind(listenFd, (sockaddr*) &server, size) < 0 ) {
+        LOG_ERROR("failed to bind domain socket: ", socketAddr);
+        return -1;
+    }
+    
+    if ( listen(listenFd, 1) < 0 ) {
+        LOG_ERROR("failed to listen domain socket: ", socketAddr);
+        return -1;
+    }
+
+    int res;
+    while ( (res = acceptClient(listenFd, bufRaw)) > 0 )
+        ;
+
+    close(listenFd);
+    return res;
+}
+
+
 int main(int argc, const char* argv[], const char* env[]) {
     parseArgs(argc, argv);
     processEnvVars(env);
@@ -125,7 +343,17 @@ int main(int argc, const char* argv[], const char* env[]) {
         return 0;
     }
 
-    // todo
+    if (buildConfig()) {
+        return -1;
+    }
 
+    if (runSocketServer()) {
+        LOG_ERROR("error occurred while running socket server!");
+        return -2;
+    }
+
+    int stat;
+    pid_t pid = wait(&stat);
+    LOG_INFO("pid ", pid, " exited, with stat: ", stat);
     return 0;
 }

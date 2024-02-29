@@ -13,7 +13,7 @@
 
 #include <iostream>
 #include <cstdlib>
-#include "../utils/ConsoleColorPad.h"
+#include "./ConsoleColorPad.h"
 
 namespace vl {
 namespace log {
@@ -75,6 +75,14 @@ inline void setColorError() {
         vl::log::setColorError(); \
         LOG_PLAIN(__VA_ARGS__); \
         vl::log::resetColor(); \
+    }
+
+#define LOG_ERROR_EXIT(...) \
+    { \
+        vl::log::setColorError(); \
+        LOG_PLAIN(__VA_ARGS__); \
+        vl::log::resetColor(); \
+        exit(-1); \
     }
 
 #define LOG_WARN(...) \

@@ -21,6 +21,10 @@ namespace vl {
 namespace protocol {
 
 inline const char* MAGIC_STR = "OycF";
+const int HEADER_LEN = 16;
+
+#define VESPER_CTRL_PROTO_DECL_GET_TYPE() \
+    virtual uint32_t getType() const override;
 
 class Base {
 public:
@@ -40,7 +44,7 @@ protected:
 class Response : public Base {
 public:
     static const uint32_t typeCode = 0xA001;
-    virtual inline uint32_t getType() const override { return typeCode; }
+    VESPER_CTRL_PROTO_DECL_GET_TYPE()
     uint32_t code;
     std::string msg;
 
@@ -53,7 +57,7 @@ protected:
 class ShellLaunch : public Base {
 public:
     static const uint32_t typeCode = 0x0001;
-    virtual inline uint32_t getType() const override { return typeCode; }
+    VESPER_CTRL_PROTO_DECL_GET_TYPE()
 
     virtual int decodeBody(const char* data, int len) override;
 
@@ -72,6 +76,8 @@ public:
  */
 Base* decode(const char* data, uint32_t type, int len);
 
+
+#undef VESPER_CTRL_PROTO_DECL_GET_TYPE
 
 } // namespace protocol
 } // namespace vl

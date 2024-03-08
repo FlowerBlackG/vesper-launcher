@@ -240,7 +240,7 @@ static int acceptClient(int listenFd, char* buf) {
     do {
         // 读入 header
 
-        const int HEADER_LEN = 16;
+        const int HEADER_LEN = vl::protocol::HEADER_LEN;
         if (readNBytesFromSocket(connFd, HEADER_LEN, dataPtr)) {
             const char* err = "failed to read header!";
             LOG_ERROR(err);
@@ -291,6 +291,16 @@ static int acceptClient(int listenFd, char* buf) {
 }
 
 
+struct AutoClose {
+    int fd;
+    AutoClose(int fd) {
+        this->fd = fd;
+    }
+    ~AutoClose() {
+        close(fd);
+    }
+};
+
 static int runSocketServer() {
     char* bufRaw = new (nothrow) char[SOCKET_DATA_BUF_SIZE];
     if (bufRaw == nullptr) {
@@ -306,6 +316,8 @@ static int runSocketServer() {
         LOG_ERROR("failed to create domain socket at: ", socketAddr);
         return -1;
     }
+
+    AutoClose autoCloseListenFd {listenFd};
 
     sockaddr_un server;
 
@@ -330,7 +342,6 @@ static int runSocketServer() {
     while ( (res = acceptClient(listenFd, bufRaw)) > 0 )
         ;
 
-    close(listenFd);
     return res;
 }
 
@@ -346,6 +357,8 @@ int main(int argc, const char* argv[], const char* env[]) {
     if (buildConfig()) {
         return -1;
     }
+
+    signal(SIGPIPE, SIG_IGN);
 
     if (runSocketServer()) {
         LOG_ERROR("error occurred while running socket server!");

@@ -58,9 +58,16 @@ int Base::decodeBody(const char*, int) {
     return -1;
 }
 
+#define VESPER_CTRL_PROTO_IMPL_GET_TYPE(className) \
+    uint32_t className::getType() const { return typeCode; }
+
+
+
+VESPER_CTRL_PROTO_IMPL_GET_TYPE(Response)
+
 
 uint64_t Response::bodyLength() const {
-    return 4 + msg.length();
+    return 8 + msg.length(); // 8B = 4B(code) + 4B(msg len)
 }
 
 
@@ -69,14 +76,16 @@ void Response::encodeBody(stringstream& container) const {
     auto codeBE = htobe32(this->code);
     container.write((char*) &codeBE, sizeof(codeBE));
 
-    uint64_t len = this->msg.length();
-    auto lenBE = htobe64(len);
-    container.write((char*) &lenBE, 4);
+    auto len = uint32_t( msg.length() );
+    auto lenBE = htobe32(len);
+    container.write((char*) &lenBE, sizeof(lenBE));
     if (len > 0) {
         container.write(msg.data(), len);
     }
 }
 
+
+VESPER_CTRL_PROTO_IMPL_GET_TYPE(ShellLaunch)
 
 int ShellLaunch::decodeBody(const char* data, int len) {
     if (len < 8) {
@@ -105,7 +114,7 @@ Base* decode(const char* data, uint32_t type, int len) {
     switch (type) {
         case ShellLaunch::typeCode: {
             auto* p = new (nothrow) ShellLaunch;
-            if ( p && p->decodeBody(data + 16, len - 16) ) {
+            if ( p && p->decodeBody(data + HEADER_LEN, len - HEADER_LEN) ) {
                 delete p;
                 p = nullptr;
             }
@@ -121,3 +130,7 @@ Base* decode(const char* data, uint32_t type, int len) {
 
 } // namespace protocol
 } // namespace vl
+
+
+
+#undef VESPER_CTRL_PROTO_IMPL_GET_TYPE

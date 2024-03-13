@@ -61,46 +61,78 @@ static void version() {
         << endl;
 }
 
+static struct {
+    bool initialized = false;
+    set<string> flagKeys;
+    set<string> valueKeys;
+} predefinedArgKeys;
+
+static void loadPredefinedArgKeys() {
+
+    struct {
+        const char* key;
+        bool isFlag;
+    } keys[] = {
+        { "--version", true },
+        { "--usage", true },
+        { "--help", true },
+        { "--domain-socket", false },
+    };
+
+    for (int i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        auto& it = keys[i];
+        (it.isFlag ? &predefinedArgKeys.flagKeys : &predefinedArgKeys.valueKeys)->insert(it.key);
+    }
+    predefinedArgKeys.initialized = true;
+}
+
 static int parseArgs(int argc, const char** argv) {
 
-    auto& flags = userArgs.flags;
-    auto& variables = userArgs.variables;
-    auto& values = userArgs.values;
-    
-    string key;
-    string value;
+    if (!predefinedArgKeys.initialized) {
+        loadPredefinedArgKeys();
+    }
+
+    const auto& isKey = [] (string& s) {
+        return s.starts_with("--");
+    };
+
 
     for (int idx = 1; idx < argc; idx++) {
-        value = argv[idx];
-        bool isKey = value.starts_with("--");
-        if (isKey) {
-            if (key != "") {
-                if (flags.contains(key)) {
-                    LOG_WARN("redefine: ", key);
-                }
-                flags.insert(key);
-            }
-
-            key = value;
-        } else { // not a key
-            if (key != "") {
-                if (variables.contains(key)) {
-                    LOG_WARN("redefine: ", key, ", which previously is ", variables[key]);
-                }
-                variables[key] = value;
-                key.clear();
+        string key = argv[idx];
+        if (predefinedArgKeys.flagKeys.contains(key)) {
+            if (userArgs.flags.contains(key)) {
+                LOG_WARN("flag redefined: ", key);
             } else {
-                values.push_back(value);
+                userArgs.flags.insert(key);
             }
+
+            continue;
+        } else if (predefinedArgKeys.valueKeys.contains(key)) {
+            if (idx + 1 == argc) {
+                LOG_ERROR("no value for key ", key);
+                return -1;
+            }
+
+            string value = argv[++idx];
+            if (isKey(value)) {
+                LOG_ERROR("key ", key, " followed by another key ", value);
+                return -1;
+            }
+
+            if (userArgs.variables.contains(key)) {
+                LOG_WARN("key ", key, " redefined. ");
+                LOG_WARN("  value |", userArgs.variables[key], "| is replaced by |", value, "|.");
+            }
+
+            userArgs.variables[key] = value;
+        } else if (isKey(key)) {
+            LOG_ERROR("key ", key, " is not defined.")
+            return -1;
+        } else {
+            userArgs.values.push_back(key);
         }
     }
 
-    if (key != "") {
-        if (flags.contains(key)) {
-            LOG_WARN("redefine: ", key);
-        }
-        flags.insert(key);
-    }
 
     return 0;
 }
@@ -347,7 +379,11 @@ static int runSocketServer() {
 
 
 int main(int argc, const char* argv[], const char* env[]) {
-    parseArgs(argc, argv);
+    if (int res = parseArgs(argc, argv)) {
+        usage();
+        return res;
+    }
+
     processEnvVars(env);
 
     if (processPureQueryCmds()) {

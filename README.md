@@ -34,9 +34,13 @@ vesper-launcher 启动后，会开启一个 Unix Domain Socket。外层监管程
 
 之后 launcher 会按照从 socket 收到的参数来启动 vesper，并在等待 vesper 运行结束后自动退出。
 
-## 基本配置
+## 运行模式
 
-建议在 linux 启动脚本里直接启动 vesper-launcher，并在其后直接添加一个退出命令。
+Vesper Launcher 支持以下几种运行方式。可以选择适合你的方式启动。
+
+### bash 阻塞模式
+
+在 linux 启动脚本里直接启动 vesper-launcher，并在其后直接添加一个退出命令。
 
 例如，你可以这样配置 ~/.bash_profile
 
@@ -45,6 +49,18 @@ vesper-launcher 启动后，会开启一个 Unix Domain Socket。外层监管程
 ./vesper-launcher [命令行参数] > vesper-launcher.log
 exit  # 执行完毕，立即退出登录。
 ```
+
+### 守护进程模式（非服务）
+
+程序启动后，自动转换为守护进程，等待连接。
+
+**推荐以这种方式使用 vesper launcher。**
+
+### 服务模式
+
+程序被安装成一个服务。
+
+**暂不支持。**
 
 ## 命令行参数
 
@@ -69,6 +85,26 @@ exit  # 执行完毕，立即退出登录。
 ```bash
 ./vesper-launcher --domain-socket v-launch.socket
 ```
+
+### --daemonize
+
+让程序以守护进程方式运行。
+
+如果选择服务模式，不要添加此参数。
+
+### --service-mode
+
+表明程序是以服务模式启动的。
+
+**该模式暂不支持。**
+
+### --wait-for-child-before-exit
+
+launcher 退出前，先等待子进程退出。
+
+### --no-color
+
+禁止命令行颜色。
 
 ## 必备的环境变量
 

@@ -18,13 +18,19 @@
 #include "./config.h"
 #include "./Protocols.h"
 
+#include <fcntl.h>
+#include <signal.h>
+
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 
 using namespace std;
 
 const int SOCKET_DATA_BUF_SIZE = 4096;
+
+/* ------------ 全局变量 ------------ */
 
 static struct {
     map<string, string> variables;
@@ -40,7 +46,17 @@ static struct {
     } environment;
 
     string domainSocket;
+
+    bool daemonize;
+    bool serviceMode;
+    bool waitForChildBeforeExit;
 } config;
+
+
+static bool systemRunning;
+static int socketListenFd = -1;
+
+/* ------------ "一句话"指令 ------------ */
 
 static void usage() {
     cout << "vesper-launcher " << VESPER_LAUNCHER_VERSION_NAME << endl;
@@ -61,6 +77,10 @@ static void version() {
         << endl;
 }
 
+
+/* ------------ 命令行解析 ------------ */
+
+
 static struct {
     bool initialized = false;
     set<string> flagKeys;
@@ -77,9 +97,13 @@ static void loadPredefinedArgKeys() {
         { "--usage", true },
         { "--help", true },
         { "--domain-socket", false },
+        { "--daemonize", true },
+        { "--service-mode", true },
+        { "--wait-for-child-before-exit", true },
+        { "--no-color", true },
     };
 
-    for (int i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         auto& it = keys[i];
         (it.isFlag ? &predefinedArgKeys.flagKeys : &predefinedArgKeys.valueKeys)->insert(it.key);
     }
@@ -163,6 +187,42 @@ static int processPureQueryCmds() {
     return 0;
 }
 
+
+/* ------------ 守护进程 ------------ */
+
+static int daemonize() {
+    pid_t pid = fork();
+    if (pid < 0) {
+        cout << "error: failed to daemonize!" << endl;
+        return -1;
+    }
+
+    // 父进程结束运行。
+    if (pid != 0) {
+        exit(0);
+    }
+
+    // 创建新会话。
+    if ((pid = setsid()) < -1) {
+        cout << "error: failed to set sid!" << endl;
+        return -1;
+    }
+
+    // 更改当前工作目录。
+    chdir("/");
+
+    umask(0);
+    signal(SIGTERM, [] (int arg) {
+        systemRunning = false;
+        if (socketListenFd != -1) {
+            shutdown(socketListenFd, SHUT_RDWR);
+        }
+    });
+
+    return 0;
+}
+
+
 static int buildConfig() {
     if (!envVars.contains("XDG_RUNTIME_DIR")) {
         cout << "error: XDG_RUNTIME_DIR required but not set." << endl;
@@ -179,9 +239,21 @@ static int buildConfig() {
     } else {
         config.domainSocket = userArgs.variables["--domain-socket"];
     }
+
+    config.daemonize = userArgs.flags.contains("--daemonize");
+    config.serviceMode = userArgs.flags.contains("--service-mode");
+    config.waitForChildBeforeExit = userArgs.flags.contains("--wait-for-child-before-exit");
+
+    if (config.daemonize && config.serviceMode) {
+        cout << "--daemonize and --service-mode should not come together. confusing!" << endl;
+        return -3;
+    }
     
     return 0;
 }
+
+
+/* ------------ 网络 ------------ */
 
 static void sendResponse(int connFd, uint32_t code, const string& msg) {
     vl::protocol::Response response;
@@ -263,6 +335,11 @@ static int acceptClient(int listenFd, char* buf) {
 
     int connFd = accept(listenFd, (sockaddr*) &client, &clientLen);
     if (connFd < 0) {
+
+        if (!systemRunning) {
+            return 0;
+        }
+
         LOG_WARN("socket connection failed.");
         return 1;
     }
@@ -370,19 +447,28 @@ static int runSocketServer() {
         return -1;
     }
 
+    systemRunning = true;
+    socketListenFd = listenFd;
     int res;
     while ( (res = acceptClient(listenFd, bufRaw)) > 0 )
         ;
 
+
+    unlink(socketAddr.c_str());
     return res;
 }
 
+/* ------------ 程序进入点 ------------ */
 
 int main(int argc, const char* argv[], const char* env[]) {
+    ConsoleColorPad::disableColor();
+
     if (int res = parseArgs(argc, argv)) {
         usage();
         return res;
     }
+
+    ConsoleColorPad::setNoColor(userArgs.flags.contains("--no-color"));
 
     processEnvVars(env);
 
@@ -394,6 +480,16 @@ int main(int argc, const char* argv[], const char* env[]) {
         return -1;
     }
 
+
+    if (config.daemonize) {
+        daemonize();
+    }
+
+    if (config.serviceMode) {
+        cout << "error: service mode is currently not supported!" << endl;
+        return -1;
+    }
+
     signal(SIGPIPE, SIG_IGN);
 
     if (runSocketServer()) {
@@ -401,8 +497,13 @@ int main(int argc, const char* argv[], const char* env[]) {
         return -2;
     }
 
-    int stat;
-    pid_t pid = wait(&stat);
-    LOG_INFO("pid ", pid, " exited, with stat: ", stat);
+    if (config.waitForChildBeforeExit) {
+        int stat;
+        pid_t pid = wait(&stat);
+        LOG_INFO("pid ", pid, " exited, with stat: ", stat);
+    }
+
+    LOG_INFO("vesper-launcher exited successfully.");
+
     return 0;
 }

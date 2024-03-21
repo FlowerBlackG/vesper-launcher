@@ -40,7 +40,25 @@ clean:
 
 .PHONY: run
 run: build
+	cd target && ./vesper-launcher \
+		--domain-socket vesper-launcher.sock \
+		--daemonize \
+		--wait-for-child-before-exit
+
+
+.PHONY: run-no-args
+run-no-args: build
 	cd target && ./vesper-launcher
+
+
+.PHONY: install
+install: build
+	cp target/vesper-launcher /usr/sbin/vesper-launcher
+
+
+.PHONY: uninstall
+uninstall:
+	rm -f /usr/sbin/vesper-launcher
 
 
 .PHONY: all

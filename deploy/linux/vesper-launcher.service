@@ -1,0 +1,10 @@
+[Unit]
+Description=vesper-launcher
+
+[Service]
+Type=forking
+ExecStart=/usr/sbin/vesper-launcher --no-color --service-mode --domain-socket vesper-launcher.sock
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

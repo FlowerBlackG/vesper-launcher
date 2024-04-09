@@ -418,7 +418,9 @@ static int runSocketServer() {
     }
     unique_ptr<char> buf(bufRaw);
 
-    string socketAddr = config.environment.xdgRuntimeDir + "/" + config.domainSocket;
+    string socketAddr = config.environment.xdgRuntimeDir;
+    socketAddr += "/";
+    socketAddr += config.domainSocket;
 
     int listenFd;
     if ( (listenFd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0 ) {
@@ -426,7 +428,6 @@ static int runSocketServer() {
         return -1;
     }
 
-    AutoClose autoCloseListenFd {listenFd};
 
     sockaddr_un server;
 
@@ -439,11 +440,13 @@ static int runSocketServer() {
 
     if ( bind(listenFd, (sockaddr*) &server, size) < 0 ) {
         LOG_ERROR("failed to bind domain socket: ", socketAddr);
+        close(listenFd);
         return -1;
     }
     
     if ( listen(listenFd, 1) < 0 ) {
         LOG_ERROR("failed to listen domain socket: ", socketAddr);
+        close(listenFd);
         return -1;
     }
 
@@ -454,6 +457,7 @@ static int runSocketServer() {
         ;
 
 
+    close(listenFd);
     unlink(socketAddr.c_str());
     return res;
 }

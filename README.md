@@ -106,6 +106,16 @@ launcher 退出前，先等待子进程退出。
 
 禁止命令行颜色。
 
+### --vesper-ctrl-sock-addr [value]
+
+当 `--quit-if-vesper-ctrl-live` 启用时，应加入此选项。
+
+value 相对 XDG_RUNTIME_DIR。
+
+### --quit-if-vesper-ctrl-live
+
+当检测到 vesper control 正在运行时（即 `$XDG_RUNTIME_DIR/[vesper-ctrl-sock-addr]` 存在时），立即退出。
+
 ## 必备的环境变量
 
 * XDG_RUNTIME_DIR

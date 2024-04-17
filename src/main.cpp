@@ -26,6 +26,8 @@
 #include <sys/un.h>
 #include <sys/stat.h>
 
+#include <filesystem>
+
 using namespace std;
 
 const int SOCKET_DATA_BUF_SIZE = 4096;
@@ -50,6 +52,9 @@ static struct {
     bool daemonize;
     bool serviceMode;
     bool waitForChildBeforeExit;
+
+    bool quitIfVesperCtrlLive;
+    string vesperCtrlSockAddr;  // 相对 $XDG_RUNTIME_DIR
 } config;
 
 
@@ -101,6 +106,8 @@ static void loadPredefinedArgKeys() {
         { "--service-mode", true },
         { "--wait-for-child-before-exit", true },
         { "--no-color", true },
+        { "--quit-if-vesper-ctrl-live", true },
+        { "--vesper-ctrl-sock-addr", false }
     };
 
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
@@ -243,6 +250,18 @@ static int buildConfig() {
     config.daemonize = userArgs.flags.contains("--daemonize");
     config.serviceMode = userArgs.flags.contains("--service-mode");
     config.waitForChildBeforeExit = userArgs.flags.contains("--wait-for-child-before-exit");
+    config.quitIfVesperCtrlLive = userArgs.flags.contains("--quit-if-vesper-ctrl-live");
+
+    if (config.quitIfVesperCtrlLive) {
+        const string vesperCtrlSockAddrCmdlineKey = "--vesper-ctrl-sock-addr";
+        if (!userArgs.variables.contains(vesperCtrlSockAddrCmdlineKey)) {
+            cout << "--quit-if-vesper-ctrl-live should be paired with " 
+                << vesperCtrlSockAddrCmdlineKey << endl;
+            return -4;
+        }
+
+        config.vesperCtrlSockAddr = userArgs.variables[vesperCtrlSockAddrCmdlineKey];
+    }
 
     if (config.daemonize && config.serviceMode) {
         cout << "--daemonize and --service-mode should not come together. confusing!" << endl;
@@ -484,6 +503,15 @@ int main(int argc, const char* argv[], const char* env[]) {
         return -1;
     }
 
+    if (config.quitIfVesperCtrlLive) {
+        string sockAddr = config.environment.xdgRuntimeDir;
+        sockAddr += '/';
+        sockAddr += config.vesperCtrlSockAddr;
+
+        if (filesystem::exists(sockAddr)) {
+            return 0;  // vesper ctrl detected. quit.
+        }
+    }
 
     if (config.daemonize) {
         daemonize();

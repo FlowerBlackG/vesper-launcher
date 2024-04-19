@@ -79,7 +79,9 @@ static void version() {
         << " (" 
         << VESPER_LAUNCHER_VERSION_CODE  
         << ")"
-        << endl;
+        << endl
+        << "  built on "
+        << VESPER_LAUNCHER_BUILD_TIME_STR << endl;
 }
 
 

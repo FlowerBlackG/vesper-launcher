@@ -16,14 +16,21 @@ help:
 	@echo "- make"
 	@echo "    alias for \"make all\""
 
-.PHONY: prepare
-prepare:
+.PHONY: prepare-debug
+prepare-debug:
 	mkdir -p build && cd build \
-	&& cmake -G"Unix Makefiles" ../src
+	&& cmake -DCMAKE_BUILD_TYPE=Debug -G"Unix Makefiles" ../src
 
 
-.PHONY: build
-build: prepare
+.PHONY: prepare-release
+prepare-release:
+	mkdir -p build && cd build \
+	&& cmake -DCMAKE_BUILD_TYPE=Release -G"Unix Makefiles" ../src
+
+
+# private target: --build
+.PHONY: --build
+--build:
 	cd build && cmake --build . -- -j 8
 	mkdir -p target && cp build/vesper-launcher target/
 	cd target && mkdir -p asm-dump \
@@ -32,14 +39,31 @@ build: prepare
 	@echo -e "\033[32mbuild success (vesper launcher).\033[0m"
 
 
+.PHONY: build-debug
+build-debug: prepare-debug --build
+
+
+.PHONY: debug
+debug: build-debug
+
+
+.PHONY: build-release
+build-release: prepare-release --build
+
+
+.PHONY: release
+release: build-release
+
+
 .PHONY: clean
 clean:
 	rm -rf ./build
 	rm -rf ./target
+	rm -f ./src/config.cpp
 
 
 .PHONY: run
-run: build
+run: debug
 	cd target && ./vesper-launcher \
 		--domain-socket vesper-launcher.sock \
 		--daemonize \
@@ -47,12 +71,12 @@ run: build
 
 
 .PHONY: run-no-args
-run-no-args: build
+run-no-args: debug
 	cd target && ./vesper-launcher
 
 
 .PHONY: install
-install: build
+install: release
 	cp target/vesper-launcher /usr/sbin/vesper-launcher
 
 
@@ -62,4 +86,4 @@ uninstall:
 
 
 .PHONY: all
-all: build
+all: debug

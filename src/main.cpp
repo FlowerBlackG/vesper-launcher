@@ -81,7 +81,7 @@ static void version() {
         << ")"
         << endl
         << "  built on "
-        << VESPER_LAUNCHER_BUILD_TIME_STR << endl;
+        << VESPER_LAUNCHER_BUILD_TIME_HUMAN_READABLE << endl;
 }
 
 
@@ -218,7 +218,7 @@ static int daemonize() {
     }
 
     // 更改当前工作目录。
-    chdir("/");
+    chdir("~");
 
     umask(0);
     signal(SIGTERM, [] (int arg) {
@@ -437,7 +437,7 @@ static int runSocketServer() {
         LOG_ERROR("failed to alloc socket data buffer");
         return -1;
     }
-    unique_ptr<char> buf(bufRaw);
+    unique_ptr<char[]> buf(bufRaw);
 
     string socketAddr = config.environment.xdgRuntimeDir;
     socketAddr += "/";

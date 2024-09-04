@@ -482,6 +482,39 @@ static int runSocketServer() {
     return res;
 }
 
+
+bool vesperControlLive() {
+    string sockAddr = config.environment.xdgRuntimeDir;
+    sockAddr += '/';
+    sockAddr += config.vesperCtrlSockAddr;
+
+    if (!filesystem::exists(sockAddr)) {
+        return false;  // vesper ctrl socket not detected.
+    }
+
+
+    // now, we should check whether vesper process presents.
+
+    // note that if vesper quit unexpectly and new instance of vesper
+    // launched without enabling vesper ctrl, this function would still
+    // return true.
+
+    string cmd = "pgrep";
+    cmd += " -x -u ";
+    cmd += to_string(geteuid());
+    cmd += " ";
+    cmd += "vesper";
+    
+    FILE* cmdPipe = popen(cmd.c_str(), "r");
+    char buf[4];
+    buf[0] = '\0';
+    fgets(buf, sizeof(buf), cmdPipe);
+    pclose(cmdPipe);
+
+    return buf[0] != '\0';
+}
+
+
 /* ------------ 程序进入点 ------------ */
 
 int main(int argc, const char* argv[], const char* env[]) {
@@ -505,11 +538,7 @@ int main(int argc, const char* argv[], const char* env[]) {
     }
 
     if (config.quitIfVesperCtrlLive) {
-        string sockAddr = config.environment.xdgRuntimeDir;
-        sockAddr += '/';
-        sockAddr += config.vesperCtrlSockAddr;
-
-        if (filesystem::exists(sockAddr)) {
+        if (vesperControlLive()) {
             return 0;  // vesper ctrl detected. quit.
         }
     }

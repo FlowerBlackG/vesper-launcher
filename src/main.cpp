@@ -30,7 +30,6 @@
 
 using namespace std;
 
-const int SOCKET_DATA_BUF_SIZE = 4096;
 
 /* ------------ 全局变量 ------------ */
 
@@ -348,7 +347,7 @@ static int readNBytesFromSocket(int connFd, int n, char* buf) {
  * @return 异常退出时，返回负数；
  *         正常退出时，如果希望结束监听，返回0；否则返回正数。
  */
-static int acceptClient(int listenFd, char* buf) {
+static int acceptClient(int listenFd, vector<char>& bufContainer) {
 
     sockaddr_un client;
     socklen_t clientLen = sizeof(client);
@@ -364,13 +363,14 @@ static int acceptClient(int listenFd, char* buf) {
         return 1;
     }
 
-    char* dataPtr = buf;
     int resCode = 0;
     do {
+
+        auto dataPtr = bufContainer.data();
+
         // 读入 header
 
-        const int HEADER_LEN = vl::protocol::HEADER_LEN;
-        if (readNBytesFromSocket(connFd, HEADER_LEN, dataPtr)) {
+        if (readNBytesFromSocket(connFd, vl::protocol::HEADER_LEN, dataPtr)) {
             const char* err = "failed to read header!";
             LOG_ERROR(err);
             sendResponse(connFd, 2, err);
@@ -393,7 +393,12 @@ static int acceptClient(int listenFd, char* buf) {
         uint64_t length = be64toh(*(uint64_t*) dataPtr);
         dataPtr += 8;
 
-        if (readNBytesFromSocket(connFd, length, dataPtr)) {
+        if (length + vl::protocol::HEADER_LEN > bufContainer.capacity())
+            bufContainer.reserve(length + vl::protocol::HEADER_LEN);
+
+        dataPtr = bufContainer.data();
+
+        if (readNBytesFromSocket(connFd, length, dataPtr + vl::protocol::HEADER_LEN)) {
             const char* err = "failed to read body!";
             LOG_ERROR(err);
             sendResponse(connFd, 5, err);
@@ -401,7 +406,7 @@ static int acceptClient(int listenFd, char* buf) {
             break;
         }
     
-        vl::protocol::Base* protocol = vl::protocol::decode(buf, type, length + HEADER_LEN);
+        vl::protocol::Base* protocol = vl::protocol::decode(dataPtr, type, length + vl::protocol::HEADER_LEN);
 
         if (protocol == nullptr) {
             const char* err = "failed to parse protocol!";
@@ -431,12 +436,7 @@ struct AutoClose {
 };
 
 static int runSocketServer() {
-    char* bufRaw = new (nothrow) char[SOCKET_DATA_BUF_SIZE];
-    if (bufRaw == nullptr) {
-        LOG_ERROR("failed to alloc socket data buffer");
-        return -1;
-    }
-    unique_ptr<char[]> buf(bufRaw);
+    vector<char> bufContainer { vl::protocol::HEADER_LEN };
 
     string socketAddr = config.environment.xdgRuntimeDir;
     socketAddr += "/";
@@ -473,7 +473,7 @@ static int runSocketServer() {
     systemRunning = true;
     socketListenFd = listenFd;
     int res;
-    while ( (res = acceptClient(listenFd, bufRaw)) > 0 )
+    while ( (res = acceptClient(listenFd, bufContainer)) > 0 )
         ;
 
 

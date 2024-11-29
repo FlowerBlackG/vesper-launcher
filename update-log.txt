@@ -1,3 +1,12 @@
+version  tag  : 1.0.4
+version  code : 5
+complete time : 2024-11-29T17:27+08:00
+update   log  :
+
+Fixed a buffer overflow vulnerability in protocol system.
+
+--------------------------------
+
 version  tag  : 1.0.3
 version  code : 4
 complete time : 2024-09-04T13:26+08:00
